@@ -1,0 +1,3 @@
+C:/Users/solar/StudioProjects/wander/android/app/.cxx/Debug/m38w5w44/x86_64/CMakeFiles/OpenCV_ffi.dir
+C:/Users/solar/StudioProjects/wander/android/app/.cxx/Debug/m38w5w44/x86_64/CMakeFiles/edit_cache.dir
+C:/Users/solar/StudioProjects/wander/android/app/.cxx/Debug/m38w5w44/x86_64/CMakeFiles/rebuild_cache.dir

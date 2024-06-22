@@ -1,0 +1,7 @@
+[
+{
+  "directory": "C:/Users/solar/StudioProjects/wander/android/app/.cxx/Debug/m38w5w44/x86",
+  "command": "C:\\Users\\solar\\AppData\\Local\\Android\\Sdk\\ndk\\23.1.7779620\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe --target=i686-none-linux-android21 --gcc-toolchain=C:/Users/solar/AppData/Local/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/windows-x86_64 --sysroot=C:/Users/solar/AppData/Local/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/windows-x86_64/sysroot -DOpenCV_ffi_EXPORTS -IC:/Users/solar/StudioProjects/wander/android/cmake/include -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -frtti -fexceptions -std=c++17 -fno-limit-debug-info  -fPIC -o CMakeFiles\\OpenCV_ffi.dir\\C_\\Users\\solar\\StudioProjects\\wander\\lib\\opencv-cpp\\main.cpp.o -c C:\\Users\\solar\\StudioProjects\\wander\\lib\\opencv-cpp\\main.cpp",
+  "file": "C:\\Users\\solar\\StudioProjects\\wander\\lib\\opencv-cpp\\main.cpp"
+}
+]

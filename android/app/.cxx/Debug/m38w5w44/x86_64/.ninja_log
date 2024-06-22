@@ -1,0 +1,5 @@
+# ninja log v5
+0	4792	738483995	CMakeFiles/OpenCV_ffi.dir/C_/Users/solar/StudioProjects/wander/lib/opencv-cpp/main.cpp.o	d8847ba7c9225414
+4799	5872	738483996	C:/Users/solar/StudioProjects/wander/build/app/intermediates/cxx/Debug/m38w5w44/obj/x86_64/libOpenCV_ffi.so	d23f4517f5df7f5b
+42	2444	738953777	C:/Users/solar/StudioProjects/wander/build/app/intermediates/cxx/Debug/m38w5w44/obj/x86_64/libOpenCV_ffi.so	d23f4517f5df7f5b
+272	2721	738963130	C:/Users/solar/StudioProjects/wander/build/app/intermediates/cxx/Debug/m38w5w44/obj/x86_64/libOpenCV_ffi.so	d23f4517f5df7f5b
