@@ -1,8 +1,15 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/services.dart';
+
+import 'extensions/weather.dart';
+
+import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'extensions/imagegen.dart';
 import 'extensions/ebaylink.dart';
+import 'extensions/email_sender.dart';
+import 'extensions/clipboard_copier.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -39,6 +46,7 @@ class _AdventurePageState extends State<AdventurePage> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
   String _text = 'Press the button and start speaking';
+  String _aitext = '';
   int _currentCameraIndex = 0;
   List<File> _capturedImages = [];
   Timer? _captureTimer;
@@ -178,7 +186,6 @@ class _AdventurePageState extends State<AdventurePage> {
     _model = GenerativeModel(
       model: 'gemini-1.5-flash',
       apiKey: 'AIzaSyDm6zkJpMgkVJu54_Gqxu_fvkDAsjPO-ns',
-      generationConfig: GenerationConfig(maxOutputTokens: 325),
     );
 
     if (savedAdventure != null) {
@@ -451,7 +458,37 @@ class _AdventurePageState extends State<AdventurePage> {
       );
 
   }
+  Future<void> _requestLocationPermission() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
 
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+
+      return;
+    }
+
+  }
+  Future<Map<String, double>?> fetchLocation() async {
+    try {
+      await _requestLocationPermission();
+      Position _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      return {
+        'latitude': _currentPosition.latitude,
+        'longitude': _currentPosition.longitude,
+      };
+    } catch (e) {
+      print('Error fetching location: $e');
+      return null; // Return null if an error occurs
+    }
+  }
 
   Future<void> _handleAiRequest() async {
     if (_text != 'Press the button and start speaking') {
@@ -463,123 +500,25 @@ class _AdventurePageState extends State<AdventurePage> {
         print('AI Decision: $decision');
 
         if (decision.contains('No')) {
-          String imagePath;
-          if (_capturedImages.isNotEmpty) {
-            final latestImage = _capturedImages.last;
-            imagePath = latestImage.path;
-          } else {
-            // Handle the case when _capturedImages is empty
-            imagePath = ''; // or provide a default image path
-          }
-
-          if (imagePath.isNotEmpty) {
-            final analysis = await analyzeImage(imagePath, prompt);
-            setState(() {
-              _text = analysis;
-              speak(analysis);
-            });
-          } else {
-            if (_isPhotoMode || _isCameraOn) {
-              setState(() {
-                String warning = 'I cannot see anything, try holding the camera button to snap or click on the livestream button. You can turn off the camera if you want to chat normally';
-                _text = warning;
-                speak(warning);
-              });
-            } else {
-              final analysis = await analyzeImage(imagePath, prompt);
-              setState(() {
-                _text = analysis;
-                speak(analysis);
-              });
-            }
-          }
-
+          await _handleNoDecision(prompt);
         } else if (decision.contains('On')) {
           _turnCameraOn();
-          setState(() {
-            _text = 'Camera turned on.';
-            speak('Camera turned on.');
-          });
-        }else if (decision.contains('Link')) {
-          bool isEnabled = await ExtensionUtils.isExtensionEnabled('ebaylink.dart');
-          if (isEnabled) {
-            String imagePath;
-            String response = '';
-            if (_capturedImages.isNotEmpty) {
-              final latestImage = _capturedImages.last;
-              imagePath = latestImage.path;
-            } else {
-              // Handle the case when _capturedImages is empty
-              imagePath = ''; // or provide a default image path
-            }
-
-            if (imagePath.isNotEmpty) {
-              final analysis = await analyzeImage(
-                  imagePath, _buildLinkPrompt());
-              setState(() {
-                response = analysis;
-                speak(analysis);
-              });
-            } else {
-              if (_isPhotoMode || _isCameraOn) {
-                setState(() {
-                  String warning = 'I cannot see anything, try holding the camera button to snap or click on the livestream button. You can turn off the camera if you want to chat normally';
-                  _text = warning;
-                  speak(warning);
-                });
-              } else {
-                final analysis = await analyzeImage(
-                    imagePath, _buildLinkPrompt());
-                setState(() {
-                  response = analysis;
-                  speak(analysis);
-                });
-              }
-            }
-            final ebayLinkGenerator = EbayLinkGenerator('IfeSolar-wander-PRD-807721e0a-1f819107');
-            final link = await ebayLinkGenerator.generateLink(response);
-            print('Generated eBay link: $link');
-            setState(() {
-              _text = link;
-              speak('Camera turned on.');
-            });
-          } else{
-            setState(() {
-              _text = 'eBay Link extension is not enabled.';
-              speak('eBay Link extension is not enabled.');
-            });
-          }
+          _setTextAndSpeak('Camera turned on.');
+        } else if (decision.contains('Weather')) {
+          await _handleWeatherDecision(prompt);
+        } else if (decision.contains('Link')) {
+          await _handleLinkDecision(prompt);
         } else if (decision.contains('Off')) {
           _turnCameraOff();
-          setState(() {
-            _text = 'Camera turned off.';
-            speak('Camera turned off.');
-          });
-        } else  if (decision.contains('Imagegen')) {
-          bool isEnabled = await ExtensionUtils.isExtensionEnabled('imagegen.dart');
-          if (isEnabled) {
-            String imageprompt = _text;
-            setState(() {
-              _text = 'Generating image.';
-              speak('Generating image.');
-            });
-             await _generateImage(imageprompt);
-            setState(() {
-              _text = 'Image successfully generated.';
-              speak('Image successfully generated.');
-            });
-          } else {
-            setState(() {
-              _text = 'Image generation extension is not enabled.';
-              speak('Image generation extension is not enabled.');
-            });
-          }
-
+          _setTextAndSpeak('Camera turned off.');
+        } else if (decision.contains('Imagegen')) {
+          await _handleImageGenDecision();
+        } else if (decision.contains('Retrieve (Copying)')) {
+          await _handleRetrieveForCopying();
+        } else if (decision.contains('Retrieve (Email)')) {
+          await _handleRetrieveForEmail();
         } else {
-          setState(() {
-            _text = decision;
-            speak(decision);
-          });
+          _setTextAndSpeak(decision);
           if (decision.contains('Yes')) {
             await _stitchImagesAndAnalyze(prevPrompt);
           }
@@ -591,6 +530,203 @@ class _AdventurePageState extends State<AdventurePage> {
       }
     }
   }
+
+// Function to handle 'Retrieve (Email)' prompt
+  Future<void> _handleRetrieveForEmail() async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? recipientEmail = prefs.getString('user_email');
+
+      if (recipientEmail == null || recipientEmail.isEmpty) {
+        print('Recipient email not set.');
+        _text = 'Recipient email not set. Please set it up in settings.';
+        return;
+      }
+
+      // Assuming _text contains the content to send via email
+      EmailSender emailSender = EmailSender();
+      await emailSender.sendEmail('Shared Text from App', _aitext);
+      _text = 'Email sent successfully.';
+    } catch (e) {
+      print('Error sending email: $e');
+      _text = ('Failed to send email.');
+    }
+  }
+  Future<void> _handleRetrieveForCopying() async {
+    try {
+      final Clipboard = ClipboardCopier();
+      // Assuming _text contains the text to copy
+      await Clipboard.copyToClipboard( _aitext);
+      print('Text copied to clipboard: $_aitext');
+      _text = 'Text copied to clipboard.';
+    } catch (e) {
+      print('Error copying text to clipboard: $e');
+      _text = 'Failed to copy text to clipboard.';
+    }
+  }
+
+  Future<void> _handleNoDecision(String prompt) async {
+    String imagePath;
+    if (_capturedImages.isNotEmpty) {
+      imagePath = _capturedImages.last.path;
+    } else {
+      imagePath = ''; // Handle the case when _capturedImages is empty
+    }
+
+    if (imagePath.isNotEmpty) {
+      final analysis = await analyzeImage(imagePath, prompt);
+      _setTextAndSpeak(analysis);
+    } else {
+      if (_isPhotoMode || _isCameraOn) {
+        String warning = 'I cannot see anything, try holding the camera button to snap or click on the livestream button. You can turn off the camera if you want to chat normally';
+        _setTextAndSpeak(warning);
+      } else {
+        final analysis = await analyzeImage(imagePath, prompt);
+        _setTextAndSpeak(analysis);
+      }
+    }
+  }
+  Future<String> parseAndDisplayErrors(String test) async {
+    // Split the test string by commas
+    List<String> parts = test.split(',').map((part) => part.trim()).toList();
+
+    String days = parts.length > 1 ? parts[1] : '';
+    String time = parts.length > 2 ? parts[2] : '';
+    String location = parts.length > 3 ? parts[3] : '';
+
+    // Check for errors and display messages
+    if (days.isEmpty || days.contains('error')) {
+      return 'Error: Number of days not specified.';
+    } else if (time.isEmpty || time.contains('error')) {
+      if (location.isEmpty || location.contains('error')) {
+        return 'Error: Time and location not specified.';
+      } else {
+        return 'Error: Time not specified.';
+      }
+    } else if (location.isEmpty || location.contains('error')) {
+      Map<String, double>? locations = await fetchLocation();
+      location = '${locations?['latitude']}, ${locations?['longitude']}';
+    }
+
+    return 'Future: $days, Time: $time, Location: $location';
+  }
+
+
+
+  Future<void> _handleWeatherDecision(String prompt) async {
+    String returnvalue = '';
+    String res = _buildWeatherPrompt();
+    final tests = await analyzePrompts(res);
+    var location = '';
+    final weatherFetcher = WeatherFetcher('1d26e3779c9b4ab5880155318242506');
+
+    if (tests.contains('alsocurrent')) {
+      final locationIndex = tests.indexOf('alsocurrent') + 'alsocurrent'.length + 1;
+      final locationEndIndex = tests.indexOf(',', locationIndex);
+      if (locationEndIndex == -1) {
+        location = tests.substring(locationIndex);
+      } else {
+        location = tests.substring(locationIndex, locationEndIndex);
+      }
+      print('location: $location');
+      final currentWeather = await weatherFetcher.fetchCurrentWeather(location);
+      returnvalue = await analyzePrompts('provide an answer to the question: $_text based on this data $currentWeather');
+    } else if (tests.contains('current')) {
+      try {
+        Map<String, double>? locations = await fetchLocation();
+        location = '${locations?['latitude']}, ${locations?['longitude']}';
+        print('location: $location');
+        final currentWeather = await weatherFetcher.fetchCurrentWeather(location);
+        returnvalue = await analyzePrompts('provide an answer to the question: $_text based on this data $currentWeather');
+      } catch (e) {
+        returnvalue = 'Failed to fetch current weather for $location: $e';
+      }
+    } else if (tests.contains('Future')) {
+      final parse = await parseAndDisplayErrors(tests);
+      if (parse.contains('Error')) {
+        returnvalue = parse;
+      } else {
+        try {
+          List<String> parts = tests.split(',').map((part) => part.trim()).toList();
+          String days = parts.length > 1 ? parts[1] : '';
+          location = parts.length > 3 ? parts[3] : '';
+          String cleanedString = days.replaceAll(RegExp(r'\s*day[s]?\s*'), '');
+          DateTime now = DateTime.now();
+          String formattedDate = "${now.year}-${now.month}-${now.day + int.tryParse(cleanedString)!}";
+          // Convert cleaned string to integer
+          int? numberOfDays = int.tryParse(cleanedString)! + 1;
+          final weatherForecast = await weatherFetcher.fetchWeatherForecast(location, numberOfDays!);
+          final forecastDay = weatherForecast['forecast']['forecastday'];
+          Map<String, dynamic> forecastForDay = forecastDay.firstWhere((day) => day['date'] == formattedDate);
+
+          // Print the target hour segment
+
+          returnvalue = await analyzePrompts('provide an answer to the question: $_text based on this data $forecastForDay');
+        } catch (e) {
+          returnvalue = 'Failed to fetch weather forecast for $location: $e';
+        }
+      }
+    } else {
+      returnvalue = 'No action for the given test string.';
+    }
+
+    _setTextAndSpeak(returnvalue);
+  }
+
+
+
+  Future<void> _handleLinkDecision(String prompt) async {
+    bool isEnabled = await ExtensionUtils.isExtensionEnabled('ebaylink.dart');
+    if (isEnabled) {
+      String imagePath;
+      if (_capturedImages.isNotEmpty) {
+        imagePath = _capturedImages.last.path;
+      } else {
+        imagePath = ''; // Handle the case when _capturedImages is empty
+      }
+
+      if (imagePath.isNotEmpty) {
+        final analysis = await analyzeImage(imagePath, _buildLinkPrompt());
+        _setTextAndSpeak(analysis);
+      } else {
+        if (_isPhotoMode || _isCameraOn) {
+          String warning = 'I cannot see anything, try holding the camera button to snap or click on the livestream button. You can turn off the camera if you want to chat normally';
+          _setTextAndSpeak(warning);
+        } else {
+          final analysis = await analyzeImage(imagePath, _buildLinkPrompt());
+          _setTextAndSpeak(analysis);
+        }
+      }
+
+      final ebayLinkGenerator = EbayLinkGenerator('IfeSolar-wander-PRD-807721e0a-1f819107');
+      final link = await ebayLinkGenerator.generateLink(_text);
+      print('Generated eBay link: $link');
+      _setTextAndSpeak(link);
+    } else {
+      _setTextAndSpeak('eBay Link extension is not enabled.');
+    }
+  }
+
+  Future<void> _handleImageGenDecision() async {
+    bool isEnabled = await ExtensionUtils.isExtensionEnabled('imagegen.dart');
+    if (isEnabled) {
+      String imageprompt = _text;
+      _setTextAndSpeak('Generating image.');
+      await _generateImage(imageprompt);
+      _setTextAndSpeak('Image successfully generated.');
+    } else {
+      _setTextAndSpeak('Image generation extension is not enabled.');
+    }
+  }
+
+  void _setTextAndSpeak(String text) {
+    setState(() {
+      _text = text;
+      _aitext = text;
+      speak(text);
+    });
+  }
+
 
   // Initial color
 
@@ -641,10 +777,13 @@ class _AdventurePageState extends State<AdventurePage> {
   }
 
 
+
   String _buildPrevPrompt() {
     return ' $_text. Say "yes" if the image meets the prompt and "no" if it does not. "No" should be a single-word answer, while "yes" should contain the reason. Have over a 65 percent certainty.';
   }
-
+  String _buildWeatherPrompt() {
+    return ' $_text. Say "current" if it requires the current location and its not stated, and "alsocurrent, the certain location" if it requires current location and its given. say "Future" if it requires a forecast and specify the amount of days , what time it is and the location. If it is a forecast and both days, time and location arent specified, reply"error" with what isnt specified should contain the reason. ';
+  }
   String _buildLinkPrompt() {
     return ' $_text. Say just the keyword or the product the user is requesting for';
   }
@@ -659,25 +798,29 @@ Reply with:
 - "On" if it involves turning on the camera,
 - "Imagegen" if it relates to generating an image.
 - "Link" if it involves producing a link to a product.
+- "Retrieve (Copying)" if it involves retrieving something for copying,
+- "Retrieve (Email)" if it involves retrieving something for sending via email.
+- "Weather" if it involves checking or discussing weather conditions.
 - If previous images or frames are required, reply "Yes" and inform the user that previous images will be checked and analyzed, and this process may take some time. For example: "Yes, previous images will be checked and analyzed. This process may take some time."
 - If a single image is sufficient and no other options apply, respond with "No."
 - If you aren't certain, check again and if you feel like there's no other matching option then respond with "No."
 Hint: The words "remember" or "looking for" usually require previous images.
 Examples to consider:
 1. "Turn off the camera" -> "Off"
-2. "End the adventure" -> "end"
+2. "End the adventure" -> "End"
 3. "Turn on the camera" -> "On"
-4. "Remember the scene from before" -> "Yes"
-5. "Look for a pattern in previous frames" -> "Yes"
-6. "Capture the current view" -> "No"
-7. "What is this" -> "No"
-8. "Generate an image of the sunset" -> "Imagegen"
-9. "Find a link to a product" -> "Link"
-
+4. "What's the weather like today?" -> "Weather"
+5. "Is it going to rain tomorrow?" -> "Weather"
+6. "Generate an image of the sunset" -> "Imagegen"
+7. "Find a link to a product" -> "Link"
+8. "Remember the scene from before" -> "Yes"
+9. "Look for a pattern in previous frames" -> "Yes"
+10. "Capture the current view" -> "No"
+11. "What is this?" -> "No"
 
 Don't respond with any other thing apart from the options given!. 
-
 ''';
+
 
       final content = [Content.text(updatedPrompt)];
       final response = await _model.generateContent(content);
@@ -823,6 +966,22 @@ Don't respond with any other thing apart from the options given!.
       return prompt; // Default to 'No' if there's an error
     }
   }
+  Future<String> analyzePrompts(String prompt) async {
+    try {
+
+      var content = Content.text(prompt);
+
+      final response = await _chatSession.sendMessage(content);
+      await _saveModelState();
+
+      print('Response: ${response.text}');
+      return response.text ?? '';
+    } catch (e) {
+      print("Error analyzing prompt: $e");
+      return prompt; // Default to 'No' if there's an error
+    }
+  }
+
 
   Future<void> _clearSavedImages() async {
     try {

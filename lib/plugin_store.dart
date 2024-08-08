@@ -28,10 +28,48 @@ class _PluginStoreState extends State<PluginStore> {
 
   Future<void> _setPreference(String key, bool value) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (key == 'email_sender.dart' && value) {
+      // If enabling the email sender, ask for the email address
+      String? email = await _showEmailInputDialog();
+      if (email != null && email.isNotEmpty) {
+        await prefs.setString('user_email', email);
+      }
+    }
     await prefs.setBool(key, value);
     setState(() {
       enabledExtensions[key] = value;
     });
+  }
+
+  Future<String?> _showEmailInputDialog() async {
+    TextEditingController emailController = TextEditingController();
+    return await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Enter Email Address'),
+          content: TextField(
+            controller: emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: InputDecoration(hintText: 'Email Address'),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(null);
+              },
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(emailController.text);
+              },
+              child: Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
