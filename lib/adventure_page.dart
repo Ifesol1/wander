@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'extensions/weather.dart';
@@ -10,6 +11,9 @@ import 'extensions/imagegen.dart';
 import 'extensions/ebaylink.dart';
 import 'extensions/email_sender.dart';
 import 'extensions/clipboard_copier.dart';
+import 'extensions/tic_tac_toe.dart';
+import 'extensions/connect_four.dart';
+import 'extensions/hangman_game.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -43,10 +47,15 @@ class AdventurePage extends StatefulWidget {
 class _AdventurePageState extends State<AdventurePage> {
   late CameraController _controller;
   late Future<void> _initializeControllerFuture;
+  String? _selectedGame;
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
   String _text = 'Press the button and start speaking';
   String _aitext = '';
+  String _title = '';
+  List<Map<String, dynamic>> _items = [];
+  final List<Map<String, dynamic>> _queue = [];
+
   int _currentCameraIndex = 0;
   List<File> _capturedImages = [];
   Timer? _captureTimer;
@@ -56,17 +65,19 @@ class _AdventurePageState extends State<AdventurePage> {
   bool _isStitching = false;
   bool _istalking = false;
   Adventure? _currentAdventure;
+  bool _isExpanded = false;
 
   final _imagesStitch = ImagesStitch();
   List<File> _stitchedImages = [];
   final ElevenLabsAPI _elevenLabsAPI = ElevenLabsAPI(
-      '1011ea8be9de4ee94b4a145ef85001a5'); // Replace with your actual API key
+      'f9c629b2ae0dcb148dc75dfa01b9ea8b'); // Replace with your actual API key
   String _selectedVoiceId = ''; // Assuming "adventurer" is the voice ID
   List<Map<String, String>> _availableVoices = [];
   bool _aiRequestHandled = false;
   bool _isCameraOn = false; // Track the camera state
   TextEditingController _adventureTypeController = TextEditingController();
   String role = '';
+  bool _isProcessing = false;
   String? _selectedVoiceName = 'Rachel';
   late GenerativeModel _model;
   late ChatSession _chatSession;
@@ -90,7 +101,6 @@ class _AdventurePageState extends State<AdventurePage> {
 
   void initState() {
     super.initState();
-
     _initializeCamera(widget.cameras[_currentCameraIndex]);
     initializeModel(savedAdventure: widget.savedAdventure);
     _fetchVoices(); // Fetch voices during initialization
@@ -103,6 +113,14 @@ class _AdventurePageState extends State<AdventurePage> {
     _speech.stop();
     _captureTimer?.cancel();
     super.dispose();
+  }
+  void _loadDataFromJson(jsonString) {
+
+    final Map<String, dynamic> parsedJson = json.decode(jsonString);
+    setState(() {
+      _title = parsedJson['title'];
+      _items = List<Map<String, dynamic>>.from(parsedJson['items']);
+    });
   }
   Map<String, dynamic> contentToJson(Content content) {
     return {
@@ -117,6 +135,7 @@ class _AdventurePageState extends State<AdventurePage> {
       (json['parts'] as List<dynamic>).map((part) => partFromJson(part as Map<String, dynamic>)).toList(),
     );
   }
+
 
   Map<String, dynamic> partToJson(Part part) {
     if (part is TextPart) {
@@ -196,7 +215,7 @@ class _AdventurePageState extends State<AdventurePage> {
     } else {
       _chatSession = await _model.startChat(history: [
         Content.text(
-          'You are $_selectedVoiceName, an AI adventure partner. You help the user answer questions and discover new things. Your current adventure is related to $role.',
+          'You are wander or wonder, an AI conversation partner. You help the user answer questions and discover new things. Your current conversation is related to $role.',
         ),
       ]);
       _currentAdventure = Adventure(
@@ -417,13 +436,14 @@ class _AdventurePageState extends State<AdventurePage> {
 
   Future<String> analyzeImage(String imagePath, String prompt) async {
     try {
+      // Check if camera is on or photo mode is active
       if (_isCameraOn || (_isPhotoMode && _currentPhoto != null)) {
+        // Process image data
+        final imageBytes = await File(imagePath).readAsBytes();
         DataPart imagePart;
 
-        final imageBytes = await File(imagePath).readAsBytes();
         if (_drawings.isNotEmpty) {
-          imagePart =
-          await _combineImageWithDrawing(DataPart('image/jpeg', imageBytes));
+          imagePart = await _combineImageWithDrawing(DataPart('image/jpeg', imageBytes));
         } else {
           imagePart = DataPart('image/jpeg', imageBytes);
         }
@@ -433,29 +453,115 @@ class _AdventurePageState extends State<AdventurePage> {
         final response = await _chatSession.sendMessage(content);
 
         await _saveModelState();
+        final aiResponse = response.text ?? "";
+        if (aiResponse.startsWith('List')) {
+          final extractedBlock = extractCodeBlock(aiResponse, '{', '}');
+          _loadDataFromJson(extractedBlock);
+          final additionalInfo = aiResponse.split('}').last.trim();  // Extract after JSON
+          return additionalInfo;
+        } else if (aiResponse.startsWith('Games')) {
+          final gameType = aiResponse.split('\n').first.trim();
+          String game = gameType.split(', ')[1]; // Extracting the game name
 
-        return response.text ?? "No response from the model.";
+          final additionalInfo = aiResponse.split(gameType).last.trim();
+          startGame(game);
+          print('game:$gameType');
+          print('info: $additionalInfo');
+          return additionalInfo;
+        } else if (aiResponse.startsWith('Remove')) {
+          final listInfo = aiResponse.split('\n').first.trim();
+          String item = listInfo.split(', ')[1]; // Extracting the game name
 
+          final additionalInfo = aiResponse.split(listInfo).last.trim();
+          print('item:$item');
+          print('info: $additionalInfo');
+          _toggleItem(item);
+          return additionalInfo;
+        } else {
+          return aiResponse.isNotEmpty ? aiResponse : "No response from the model.";
+        }
       } else {
-        var content = Content.text(prompt);
+        // Process prompt without image
+        final String newPrompt = '''
+User's prompt: $prompt
+If it involves playing a game (Connect Four, TicTacToe, or Hangman). If the specific game is not mentioned, respond with a list of available games. If the game is mentioned, respond with "Games, specific game".
+If the prompt involves tasks like grocery shopping or a treasure hunt, respond with:
+List,
+{
+  "title": "My Tasks",
+  "items": [
+    {"title": "Buy groceries", "completed": false},
+    {"title": "Walk the dog", "completed": false},
+    {"title": "Read a book", "completed": false}
+  ]
+}
+If a user says they've found an item or wants an item crossed out or removed, return "Remove, specific item being removed" and, on a separate line, provide a normal response to the prompt.
+Ignore games and lists if they don't relate and just do what the user asks.
+Additionally, provide relevant information about the list or game, similar to a voiceover, after the JSON. These should start on a separate line.
+''';
 
-        final response = await _chatSession.sendMessage(content);
+        var content = Content.text(newPrompt);
         await _saveModelState();
 
-        return response.text ?? "No response from the model.";
+        final response = await _chatSession.sendMessage(content);
+        final aiResponse = response.text ?? "";
+        print(aiResponse);
+        if (aiResponse.startsWith('List')) {
+          final extractedBlock = extractCodeBlock(aiResponse, '{', '}');
+          _loadDataFromJson(extractedBlock);
+          final additionalInfo = aiResponse.split('}').last.trim();  // Extract after JSON
+          return additionalInfo;
+        } else if (aiResponse.startsWith('Games')) {
+          final gameType = aiResponse.split('\n').first.trim();
+          String game = gameType.split(', ')[1];  // Extracting the game name
+
+          String additionalInfo = '';
+          if (aiResponse.contains('}')) {
+            additionalInfo = aiResponse.split('}').last.trim();  // Extract after the closing curly brace
+          } else {
+            additionalInfo = aiResponse.split(gameType).last.trim();  // Extract after the gameType
+          }
+
+          startGame(game);
+          print('game: $gameType');
+          print('info: $additionalInfo');
+          return additionalInfo;
+
+        } else if (aiResponse.startsWith('Remove')) {
+          final listInfo = aiResponse.split('\n').first.trim();
+          String item = listInfo.split(', ')[1];
+          final additionalInfo = aiResponse.split(listInfo).last.trim();
+          print('item:$item');
+          print('info: $additionalInfo');
+          _toggleItem(item);
+          return additionalInfo;
+        } else {
+          return aiResponse.isNotEmpty ? aiResponse : "No response from the model.";
+        }
       }
     } catch (e) {
       print("Error analyzing prompt: $e");
       return 'Error analyzing prompt';
     }
   }
+
+  void startGame(String gameType) {
+    setState(() {
+      _selectedGame = gameType; // Set the selected game
+    });
+
+    // Additional logic can go here if needed
+  }
+  bool _isGameSelected() {
+    return _selectedGame != null;
+  }
   Future<void> _launchURL(String url) async {
     var uri = Uri.parse(url);
 
-      await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication, // Use this mode to open URLs in an external browser
-      );
+    await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication, // Use this mode to open URLs in an external browser
+    );
 
   }
   Future<void> _requestLocationPermission() async {
@@ -489,7 +595,16 @@ class _AdventurePageState extends State<AdventurePage> {
       return null; // Return null if an error occurs
     }
   }
+  String extractCodeBlock(String code, String startPattern, String endPattern) {
+    final startIndex = code.indexOf(startPattern);
+    final endIndex = code.lastIndexOf(endPattern);
 
+    if (startIndex == -1 || endIndex == -1 || endIndex < startIndex) {
+      return '';
+    }
+
+    return code.substring(startIndex, endIndex + endPattern.length);
+  }
   Future<void> _handleAiRequest() async {
     if (_text != 'Press the button and start speaking') {
       final prompt = _buildPrompt();
@@ -564,9 +679,31 @@ class _AdventurePageState extends State<AdventurePage> {
       _text = 'Failed to copy text to clipboard.';
     }
   }
+  void _toggleItem(String itemTitle) {
+    setState(() {
+      // Find the item in the list by title
+      final item = _items.firstWhere(
+            (element) => element['title'] == itemTitle,
+        orElse: () => <String, dynamic>{}, // Return an empty map
+      );
+
+      // If the item is found, toggle its 'completed' status
+      if (item.isNotEmpty) {
+        item['completed'] = !item['completed'];
+      }
+
+      // Check if all items are completed, if so, clear the list
+      if (_items.every((element) => element['completed'])) {
+        _items.clear();
+      }
+    });
+  }
+
+
 
   Future<void> _handleNoDecision(String prompt) async {
     String imagePath;
+    print(prompt);
     if (_capturedImages.isNotEmpty) {
       imagePath = _capturedImages.last.path;
     } else {
@@ -743,6 +880,8 @@ class _AdventurePageState extends State<AdventurePage> {
       _isCameraOn = true;
       _isPhotoMode = false;
       _drawings = [];
+      _selectedGame = null;
+
     }
   }
 
@@ -754,13 +893,14 @@ class _AdventurePageState extends State<AdventurePage> {
   }
 
   void _onPhotoMode() {
-    print( _chatSession.history.map((content) => content.toJson()).toList());
     if (!_isPhotoMode) {
       _initializeCamera(widget.cameras[_currentCameraIndex]);
       _currentPhoto = null;
       _isCameraOn = false;
       _isPhotoMode = true;
       _drawings = [];
+      _selectedGame = null;
+
     }
   }
 
@@ -768,6 +908,7 @@ class _AdventurePageState extends State<AdventurePage> {
     if (_isPhotoMode) {
       _controller.dispose();
       _isPhotoMode = false;
+
     }
   }
 
@@ -791,20 +932,20 @@ class _AdventurePageState extends State<AdventurePage> {
     try {
       final updatedPrompt = '''
 Analyse this prompt: $prompt
-Don't respond with any other thing apart from the options given!. 
-Reply with:
-- "End" if it involves ending an adventure,
-- "Off" if it involves turning off the camera,
-- "On" if it involves turning on the camera,
+Don't respond with anything other than the options provided below:
+- "End" if the prompt involves ending an adventure.
+- "Off" if it involves turning off the camera.
+- "On" if it involves turning on the camera.
 - "Imagegen" if it relates to generating an image.
 - "Link" if it involves producing a link to a product.
-- "Retrieve (Copying)" if it involves retrieving something for copying,
+- "Retrieve (Copying)" if it involves retrieving something for copying.
 - "Retrieve (Email)" if it involves retrieving something for sending via email.
 - "Weather" if it involves checking or discussing weather conditions.
-- If previous images or frames are required, reply "Yes" and inform the user that previous images will be checked and analyzed, and this process may take some time. For example: "Yes, previous images will be checked and analyzed. This process may take some time."
-- If a single image is sufficient and no other options apply, respond with "No."
-- If you aren't certain, check again and if you feel like there's no other matching option then respond with "No."
-Hint: The words "remember" or "looking for" usually require previous images.
+- "Yes" if previous images or frames are required. Inform the user that previous images will be checked and analyzed, and this process may take some time. Example: "Yes, previous images will be checked and analyzed. This process may take some time."
+- "No" if a single image is sufficient and no other options apply. If uncertain, double-check, and if no other option matches, respond with "No."
+
+Hint: The words "remember" or "looking for" usually indicate that previous images are needed.
+
 Examples to consider:
 1. "Turn off the camera" -> "Off"
 2. "End the adventure" -> "End"
@@ -813,12 +954,13 @@ Examples to consider:
 5. "Is it going to rain tomorrow?" -> "Weather"
 6. "Generate an image of the sunset" -> "Imagegen"
 7. "Find a link to a product" -> "Link"
-8. "Remember the scene from before" -> "Yes"
+8. "Remember the scene from before" -> "Yes, previous images will be checked and analyzed."
 9. "Look for a pattern in previous frames" -> "Yes"
 10. "Capture the current view" -> "No"
 11. "What is this?" -> "No"
 
-Don't respond with any other thing apart from the options given!. 
+
+Don't respond with anything other than the options provided!
 ''';
 
 
@@ -1083,6 +1225,7 @@ Don't respond with any other thing apart from the options given!.
         }
         _capturedImages.add(savedImage);
       });
+
     } catch (e) {
       print(e);
     }
@@ -1140,6 +1283,7 @@ Don't respond with any other thing apart from the options given!.
     return Scaffold(
       body: Stack(
         children: [
+          // Background with gradient
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -1148,51 +1292,194 @@ Don't respond with any other thing apart from the options given!.
                 end: Alignment.bottomRight,
               ),
             ),
-            child: _isStarted || widget.savedAdventure!= null? buildAdventureContent() : buildSetupContent(),
+            child: _isStarted || widget.savedAdventure != null
+                ? _isGameSelected()
+                ? _buildGameScreen()
+                : buildAdventureContent()
+                : buildSetupContent(),
           ),
-          if (_isStarted || widget.savedAdventure!= null)
-          Positioned(
-            top: 50, // Adjust the top position as needed
-            left: 20, // Adjust the left position as needed
-            right: 20, // Adjust the right position as needed
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: 45,
-                maxHeight: 100,
-              ),
-              child: Container(
-                padding: EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(10),
+
+          // Game screen positioned within the camera area
+          if (_isStarted || widget.savedAdventure != null)
+            Positioned(
+              top: 50,
+              left: 20,
+              right: 20,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: 45,
+                  maxHeight: 100,
                 ),
-                child:  SingleChildScrollView(
-    scrollDirection: Axis.vertical,
-    child: GestureDetector(
-    onTap: () {
-    if (_isValidURL(_text)) {
-    _launchURL(_text);
-    } else {
-    // Handle invalid URL case here
-    print('Invalid URL');
-    }
-    },
-    child: Text(
-    _text,
-    style: TextStyle(
-    color: _isValidURL(_text) ? Colors.blue : Colors.white,
-    fontSize: 16,
-    ),
-    ),
-    ),
+                child: Container(
+                  padding: EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.vertical,
+                    child: GestureDetector(
+                      onTap: () {
+                        if (_isValidURL(_text)) {
+                          _launchURL(_text);
+                        } else {
+                          print('Invalid URL');
+                        }
+                      },
+                      child: Text(
+                        _text,
+                        style: TextStyle(
+                          color: _isValidURL(_text)
+                              ? Colors.blue
+                              : Colors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+
+
+
+              // Draggable to-do list with Material ancestor
+              if (_items.isNotEmpty)
+    Align(
+    alignment: _isExpanded
+    ? Alignment.centerRight
+        : Alignment.bottomRight,
+    child: Padding(
+    padding: EdgeInsets.only(
+    bottom: _isExpanded ? 0.0 : 115.0, // Adjust this value as needed
+    ),
+    child: _buildTaskContainer(),
+    ),
+    )
+
+
+    // 'X' Button for closing the to-do list
+
         ],
       ),
     );
   }
+
+  Widget _buildGameScreen() {
+    return Column(
+      children: [
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.teal.shade200, Colors.teal.shade800],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: _selectedGame == 'TicTacToe'
+                ? TicTacToeGame()
+                : _selectedGame == 'Connect Four'
+                ? ConnectFourGame()
+                : _selectedGame == 'Hangman'
+                ? HangmanGame()
+                : Center(child: Text('No game selected.')),
+          ),
+        ),
+        buildControls(),
+      ],
+    );
+  }
+
+  Widget _buildTaskContainer() {
+    int completedCount = _items.where((item) => item['completed']).length;
+    int totalCount = _items.length;
+    return AnimatedContainer(
+      duration: Duration(milliseconds: 300),
+      width: 250,
+      height: _isExpanded ? 400 : 100, // Adjust height when minimized
+      margin: EdgeInsets.only(right: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.8), // Semi-transparent
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(2, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _isExpanded = !_isExpanded;
+              });
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _title,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Icon(
+                  _isExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 24,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 10),
+          if (_isExpanded)
+            Expanded(
+              child: Scrollbar(
+                child: ListView.builder(
+                  itemCount: _items.length,
+                  itemBuilder: (context, index) {
+                    final item = _items[index];
+                    return ListTile(
+                      title: Text(
+                        item['title'],
+                        style: TextStyle(
+                          fontSize: 16,
+                          decoration: item['completed']
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
+                        ),
+                      ),
+                      trailing: Icon(
+                        item['completed']
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        color: item['completed'] ? Colors.green : Colors.grey,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            )
+          else
+            Text(
+              "$completedCount/$totalCount completed",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+
 
   Widget buildAdventureContent() {
     return Column(
@@ -1432,7 +1719,7 @@ Don't respond with any other thing apart from the options given!.
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            'Select your adventure buddy',
+            'Select the voice of your chat buddy',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           SizedBox(height: 16),
@@ -1454,7 +1741,7 @@ Don't respond with any other thing apart from the options given!.
           ),
           SizedBox(height: 16),
           Text(
-            'What type of adventure?',
+            'Main topic of the conversation?',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           SizedBox(height: 16),
@@ -1464,7 +1751,7 @@ Don't respond with any other thing apart from the options given!.
               controller: _adventureTypeController,
               decoration: InputDecoration(
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
-                labelText: 'Adventure Type',
+                labelText: 'Conversation Topic',
                 labelStyle: TextStyle(color: Colors.white70),
                 filled: true,
                 fillColor: Colors.white10,

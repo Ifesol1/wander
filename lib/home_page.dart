@@ -116,9 +116,9 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(height: 25),
+              SizedBox(height: 100),
               Text(
-                'Welcome to the Adventure App!',
+                'Welcome to Wander!',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -127,7 +127,7 @@ class _HomePageState extends State<HomePage> {
               ),
               SizedBox(height: 16),
               Text(
-                'Previous Adventures:',
+                'Previous Conversations:',
                 style: TextStyle(
                   fontSize: 22,
                   color: Colors.white70,
@@ -183,7 +183,7 @@ class _HomePageState extends State<HomePage> {
                   });
                 },
                 icon: Icon(Icons.add, color: Colors.white),
-                label: Text('Start a New Adventure', style: TextStyle(color: Colors.white)),
+                label: Text('Start a New Conversation', style: TextStyle(color: Colors.white)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
